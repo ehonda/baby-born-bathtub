@@ -484,4 +484,5 @@ $RECYCLE.BIN/
 *.swp
 
 # Generated images
-*.png
+output
+input
