@@ -219,8 +219,9 @@ double innerHalfH = ringInnerH / 2.0;
 		double tubRotH = tubH;
 
 // Align lower-left corner of rotated tub to inner ring's lower-left corner (-innerHalfW, -innerHalfH)
-		double tubCenterX = -innerHalfW + tubRotW / 2.0;
-		double tubCenterY = -innerHalfH + tubRotH / 2.0;
+	double tubCenterX = -innerHalfW + tubRotW / 2.0;
+	// Align the bathtub's half-depth (midline) with the inner ring's midline (y=0)
+	double tubCenterY = 0;
 
 		var tubPts = RoundedRectPolygon(tubCenterX, tubCenterY, tubW, tubH, tubRadius, rotationDegrees: 0, cornerSegments: 24);
 		var tubPoly = plot.Add.Polygon(tubPts);
