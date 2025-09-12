@@ -46,6 +46,25 @@ public class MultiPlotSettings : CommandSettings
 	public int? TileHeight { get; init; }
 }
 
+public class StackedPlotSettings : CommandSettings
+{
+	[CommandOption("-f|--file <FILE>")]
+	[Description("Input JSON file(s). Specify multiple times to stack multiple models in one plot.")]
+	public string[] Files { get; init; } = Array.Empty<string>();
+
+	[CommandOption("-o|--out <PATH>")]
+	[Description("Output PNG path (default: output/stacked.png)")]
+	public string? OutPath { get; init; }
+
+	[CommandOption("--width <PX>")]
+	[Description("Canvas width in pixels (default: 1400)")]
+	public int? Width { get; init; }
+
+	[CommandOption("--height <PX>")]
+	[Description("Canvas height in pixels (default: 1000)")]
+	public int? Height { get; init; }
+}
+
 // Data Model
 public record BathtubModel(
 	string Name,
@@ -168,6 +187,61 @@ public sealed class MultiPlotCommand : Command<MultiPlotSettings>
 	}
 }
 
+public sealed class StackedPlotCommand : Command<StackedPlotSettings>
+{
+	public override int Execute(CommandContext context, StackedPlotSettings settings)
+	{
+		try
+		{
+			var files = (settings.Files?.Length > 0 ? settings.Files : Array.Empty<string>()).ToList();
+			if (files.Count == 0)
+			{
+				AnsiConsole.MarkupLine("[red]No input files provided. Use -f multiple times to add files.[/]");
+				return -1;
+			}
+
+			var items = new List<(string path, BathtubModel model)>();
+			foreach (var f in files)
+			{
+				if (!System.IO.File.Exists(f))
+				{
+					AnsiConsole.MarkupLine($"[yellow]Skipping missing file:[/] {f}");
+					continue;
+				}
+				var model = ModelLoader.LoadModel(f);
+				if (model is null)
+				{
+					AnsiConsole.MarkupLine($"[yellow]Skipping invalid JSON:[/] {f}");
+					continue;
+				}
+				items.Add((f, model));
+			}
+
+			if (items.Count == 0)
+			{
+				AnsiConsole.MarkupLine("[red]No valid inputs to process.[/]");
+				return -2;
+			}
+
+			string outDir = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "output");
+			System.IO.Directory.CreateDirectory(outDir);
+			string outPath = settings.OutPath ?? System.IO.Path.Combine(outDir, "stacked.png");
+
+			int width = settings.Width ?? 1400;
+			int height = settings.Height ?? 1000;
+
+			Plotter.GenerateStackedPlot(items, outPath, width, height);
+			AnsiConsole.MarkupLine($"Saved stacked plot to [green]{outPath}[/]");
+			return 0;
+		}
+		catch (Exception ex)
+		{
+			AnsiConsole.WriteException(ex, ExceptionFormats.ShortenEverything);
+			return -3;
+		}
+	}
+}
+
 // Entry
 internal class Program
 {
@@ -178,6 +252,7 @@ internal class Program
 		{
 			cfg.AddCommand<SinglePlotCommand>("single");
 			cfg.AddCommand<MultiPlotCommand>("multi");
+			cfg.AddCommand<StackedPlotCommand>("stacked");
 			// Default command is SinglePlotCommand via generic CommandApp
 		});
 		return app.Run(args);
@@ -195,6 +270,97 @@ public static class Plotter
 	{
 		var plot = new Plot();
 		FillPlot(plot, model);
+		plot.SavePng(outPath, width, height);
+	}
+
+	public static void GenerateStackedPlot(List<(string path, BathtubModel model)> items, string outPath, int width = 1400, int height = 1000)
+	{
+		var plot = new Plot();
+
+		// Colors palette for distinct tubs
+		SPColor[] palette = new[]
+		{
+			SPColors.Crimson, SPColors.SteelBlue, SPColors.ForestGreen, SPColors.DarkOrange,
+			SPColors.MediumVioletRed, SPColors.Teal, SPColors.Sienna, SPColors.SlateBlue,
+		};
+
+		// Colors for shower elements
+		SPColor showerOuterFill = SPColors.LightGray.WithAlpha(.15);
+		SPColor showerRingFill = SPColors.SlateGray.WithAlpha(.10);
+		SPColor showerInnerFill = SPColors.SteelBlue.WithAlpha(.07);
+		SPColor showerBorder = SPColors.DarkSlateGray;
+
+		// Draw shower outer rectangle
+		void AddCenteredRect(double w, double h, SPColor fill, SPColor border, double borderWidth, string? label = null)
+		{
+			double xMin = -w / 2.0;
+			double xMax = +w / 2.0;
+			double yMin = -h / 2.0;
+			double yMax = +h / 2.0;
+			var r = plot.Add.Rectangle(xMin, xMax, yMin, yMax);
+			r.FillStyle.Color = fill;
+			r.LineStyle.Color = border;
+			r.LineStyle.Width = (float)borderWidth;
+			if (!string.IsNullOrWhiteSpace(label))
+				r.LegendText = label;
+		}
+
+		AddCenteredRect(84, 81, showerOuterFill, showerBorder, 2, label: "Shower Outer 84×81 cm");
+
+		// Shower rings
+		double ringOuterW = 78, ringOuterH = 75;
+		double ringInnerW = 60, ringInnerH = 60;
+		double ringOuterR = Math.Min(ringOuterW, ringOuterH) * 0.08;
+		double ringInnerR = Math.Min(ringInnerW, ringInnerH) * 0.08;
+
+		var outerRingPts = RoundedRectPolygon(0, 0, ringOuterW, ringOuterH, ringOuterR, rotationDegrees: 0, cornerSegments: 24);
+		var outerRing = plot.Add.Polygon(outerRingPts);
+		outerRing.FillColor = showerRingFill;
+		outerRing.LineColor = showerBorder;
+		outerRing.LineWidth = 2;
+		outerRing.LegendText = "Outer Ring 78×75 cm";
+
+		var innerRingPts = RoundedRectPolygon(0, 0, ringInnerW, ringInnerH, ringInnerR, rotationDegrees: 0, cornerSegments: 24);
+		var innerRing = plot.Add.Polygon(innerRingPts);
+		innerRing.FillColor = showerInnerFill;
+		innerRing.LineColor = showerBorder;
+		innerRing.LineWidth = 2;
+		innerRing.LegendText = "Inner Ring 60×60 cm";
+
+		// Draw each tub with distinct color and abbreviated legend label
+		for (int i = 0; i < items.Count; i++)
+		{
+			var (path, model) = items[i];
+			double tubW = model.WidthCm;
+			double tubH = model.HeightCm;
+			double tubRadius = Math.Min(tubW, tubH) * (model.CornerRadiusPercent / 100.0);
+
+			double innerHalfW = ringInnerW / 2.0;
+			double tubCenterX = -innerHalfW + tubW / 2.0;
+			double tubCenterY = 0; // midline alignment
+
+			var tubPts = RoundedRectPolygon(tubCenterX, tubCenterY, tubW, tubH, tubRadius, rotationDegrees: 0, cornerSegments: 24);
+
+			var color = palette[i % palette.Length];
+			var tubPoly = plot.Add.Polygon(tubPts);
+			tubPoly.FillColor = color.WithAlpha(.22);
+			tubPoly.LineColor = color;
+			tubPoly.LineWidth = 3;
+
+			string baseName = System.IO.Path.GetFileNameWithoutExtension(path);
+			tubPoly.LegendText = $"{baseName}: {tubW}×{tubH} cm";
+		}
+
+		// Axes and labels
+		plot.Axes.SquareUnits();
+		plot.Axes.Margins(0.05, 0.05);
+		double pad = 6;
+		plot.Axes.SetLimits(-84 / 2.0 - pad, 84 / 2.0 + pad, -81 / 2.0 - pad, 81 / 2.0 + pad);
+		plot.Legend.IsVisible = true;
+		plot.Title($"Bathtub Comparison (stacked) — {items.Count} model(s)");
+		plot.Axes.Bottom.Label.Text = "Width (cm)";
+		plot.Axes.Left.Label.Text = "Depth (cm)";
+
 		plot.SavePng(outPath, width, height);
 	}
 
