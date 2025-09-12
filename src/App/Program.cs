@@ -243,8 +243,8 @@ double innerHalfH = ringInnerH / 2.0;
 // Add a legend for clarity
 		plot.Legend.IsVisible = true;
 
-// Title and axis labels (units)
-		plot.Title("Shower Box vs. Baby Born Bathtub (cm)");
+		// Title and axis labels (units)
+		plot.Title(string.IsNullOrWhiteSpace(model.Name) ? "Bathtub Model" : model.Name);
 		plot.Axes.Bottom.Label.Text = "Width (cm)";
 		plot.Axes.Left.Label.Text = "Depth (cm)";
 
