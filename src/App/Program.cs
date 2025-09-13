@@ -379,17 +379,7 @@ public static class Plotter
 		// Optionally draw a single baby aligned to the innermost tub midlines
 		if (withBaby && innermostCenterX.HasValue && innermostCenterY.HasValue)
 		{
-			double babyW = 17.0; // along X
-			double babyH = 40.0; // along Y
-			double bxMin = innermostCenterX.Value - babyW / 2.0;
-			double bxMax = innermostCenterX.Value + babyW / 2.0;
-			double byMin = innermostCenterY.Value - babyH / 2.0;
-			double byMax = innermostCenterY.Value + babyH / 2.0;
-			var babyRect = plot.Add.Rectangle(bxMin, bxMax, byMin, byMax);
-			babyRect.FillStyle.Color = SPColors.HotPink.WithAlpha(.18);
-			babyRect.LineStyle.Color = SPColors.DeepPink;
-			babyRect.LineStyle.Width = 2;
-			babyRect.LegendText = "Baby 40×17 cm";
+			DrawBabySilhouette(plot, innermostCenterX.Value, innermostCenterY.Value, 17.0, 40.0, legendLabel: "Baby 40×17 cm");
 		}
 
 		// Axes and labels
@@ -544,20 +534,10 @@ public static class Plotter
 		tubPoly.LineWidth = 3;
 		tubPoly.LegendText = $"Bathtub {tubW}×{tubH} cm";
 
-		// Optionally overlay baby rectangle aligned to tub midlines
+		// Optionally draw a baby doll silhouette aligned to the tub midlines
 		if (withBaby)
 		{
-			double babyW = 17.0; // along X
-			double babyH = 40.0; // along Y
-			double bxMin = tubCenterX - babyW / 2.0;
-			double bxMax = tubCenterX + babyW / 2.0;
-			double byMin = tubCenterY - babyH / 2.0;
-			double byMax = tubCenterY + babyH / 2.0;
-			var babyRect = plot.Add.Rectangle(bxMin, bxMax, byMin, byMax);
-			babyRect.FillStyle.Color = SPColors.HotPink.WithAlpha(.18);
-			babyRect.LineStyle.Color = SPColors.DeepPink;
-			babyRect.LineStyle.Width = 2;
-			babyRect.LegendText = "Baby 40×17 cm";
+			DrawBabySilhouette(plot, tubCenterX, tubCenterY, 17.0, 40.0, legendLabel: "Baby 40×17 cm");
 		}
 
 		// Axis setup: square units so geometry isn't distorted
@@ -577,6 +557,85 @@ public static class Plotter
 		plot.Title(string.IsNullOrWhiteSpace(model.Name) ? "Bathtub Model" : model.Name);
 		plot.Axes.Bottom.Label.Text = "Width (cm)";
 		plot.Axes.Left.Label.Text = "Depth (cm)";
+	}
+
+	private static void DrawBabySilhouette(Plot plot, double centerX, double centerY, double width, double height, string? legendLabel = null)
+	{
+		// Proportional silhouette inside a width×height bounding box (default 17×40 cm)
+		double W = width;
+		double H = height;
+
+		SPColor line = SPColors.DeepPink;
+		SPColor fill = SPColors.DeepPink.WithAlpha(.10);
+
+		// Convenience extents
+		double left = centerX - W / 2.0;
+		double right = centerX + W / 2.0;
+		double top = centerY + H / 2.0;
+		double bottom = centerY - H / 2.0;
+
+		// Head (ellipse)
+		double headH = H * 0.22;
+		double headW = W * 0.60;
+		double headCY = top - headH / 2.0 - H * 0.05; // slight top margin
+		var head = plot.Add.Ellipse(new Coordinates(centerX, headCY), headW / 2.0, headH / 2.0);
+		head.FillStyle.Color = fill;
+		head.LineStyle.Color = line;
+		head.LineStyle.Width = 2;
+		if (!string.IsNullOrWhiteSpace(legendLabel))
+			head.LegendText = legendLabel; // use single legend item
+
+		// Torso/hips (polygon)
+		double neckY = headCY - headH / 2.0 + H * 0.02;
+		double shouldersW = W * 0.90;
+		double waistW = W * 0.55;
+		double hipsW = W * 0.80;
+		double torsoTopY = neckY - H * 0.02;
+		double torsoMidY = centerY - H * 0.02;
+		double crotchY = bottom + H * 0.14;
+
+		Coordinates[] torso = new Coordinates[]
+		{
+			new(centerX - shouldersW/2, torsoTopY),
+			new(centerX - waistW/2,     torsoMidY),
+			new(centerX - hipsW/2,      crotchY),
+			new(centerX + hipsW/2,      crotchY),
+			new(centerX + waistW/2,     torsoMidY),
+			new(centerX + shouldersW/2, torsoTopY),
+		};
+		var torsoPoly = plot.Add.Polygon(torso);
+		torsoPoly.FillColor = fill;
+		torsoPoly.LineColor = line;
+		torsoPoly.LineWidth = 2;
+
+		// Arms (rotated ellipses) constrained within bounding width
+		double armLen = H * 0.22;
+		double armThick = W * 0.18; // ellipse minor axis (width)
+		double shoulderY = torsoTopY - H * 0.02;
+		double armMargin = W * 0.02; // keep a small margin from the box edge
+		double shoulderXOffset = (W / 2.0) - (armThick / 2.0) - armMargin;
+		var leftArm = plot.Add.Ellipse(new Coordinates(centerX - shoulderXOffset, shoulderY - armLen * 0.1), armThick / 2.0, armLen / 2.0, Angle.FromDegrees(-20));
+		leftArm.FillStyle.Color = fill;
+		leftArm.LineStyle.Color = line;
+		leftArm.LineStyle.Width = 2;
+		var rightArm = plot.Add.Ellipse(new Coordinates(centerX + shoulderXOffset, shoulderY - armLen * 0.1), armThick / 2.0, armLen / 2.0, Angle.FromDegrees(20));
+		rightArm.FillStyle.Color = fill;
+		rightArm.LineStyle.Color = line;
+		rightArm.LineStyle.Width = 2;
+
+		// Legs (slightly rotated ellipses)
+		double legLen = H * 0.30;
+		double legThick = W * 0.20;
+		double legY = bottom + legLen / 2.0 + H * 0.02;
+		double legXOffset = W * 0.20;
+		var leftLeg = plot.Add.Ellipse(new Coordinates(centerX - legXOffset, legY), legThick / 2.0, legLen / 2.0, Angle.FromDegrees(-3));
+		leftLeg.FillStyle.Color = fill;
+		leftLeg.LineStyle.Color = line;
+		leftLeg.LineStyle.Width = 2;
+		var rightLeg = plot.Add.Ellipse(new Coordinates(centerX + legXOffset, legY), legThick / 2.0, legLen / 2.0, Angle.FromDegrees(3));
+		rightLeg.FillStyle.Color = fill;
+		rightLeg.LineStyle.Color = line;
+		rightLeg.LineStyle.Width = 2;
 	}
 
 	private static Coordinates RotatePoint(Coordinates p, Coordinates center, double radians)
