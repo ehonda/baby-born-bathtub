@@ -21,6 +21,10 @@ public class SinglePlotSettings : CommandSettings
 	[CommandArgument(0, "[file]")]
 	[Description("Path to bathtub model JSON (default: input/kaufland-heless.json)")]
 	public string? FilePath { get; set; }
+
+	[CommandOption("--with-baby")]
+	[Description("Overlay a 40×17 cm rectangular baby depiction aligned to the bathtub midlines.")]
+	public bool WithBaby { get; init; }
 }
 
 public class MultiPlotSettings : CommandSettings
@@ -44,6 +48,10 @@ public class MultiPlotSettings : CommandSettings
 	[CommandOption("--tile-height <PX>")]
 	[Description("Height in pixels per tile (default: 1000)")]
 	public int? TileHeight { get; init; }
+
+	[CommandOption("--with-baby")]
+	[Description("Overlay a 40×17 cm rectangular baby depiction aligned to each bathtub's midlines.")]
+	public bool WithBaby { get; init; }
 }
 
 public class StackedPlotSettings : CommandSettings
@@ -63,6 +71,10 @@ public class StackedPlotSettings : CommandSettings
 	[CommandOption("--height <PX>")]
 	[Description("Canvas height in pixels (default: 1000)")]
 	public int? Height { get; init; }
+
+	[CommandOption("--with-baby")]
+	[Description("Overlay a 40×17 cm rectangular baby depiction aligned to the smallest (innermost) bathtub's midlines.")]
+	public bool WithBaby { get; init; }
 }
 
 // Data Model
@@ -96,7 +108,7 @@ public sealed class SinglePlotCommand : Command<SinglePlotSettings>
 			string baseName = System.IO.Path.GetFileNameWithoutExtension(filePath);
 			string outPath = System.IO.Path.Combine(outDir, baseName + ".png");
 
-			Plotter.GeneratePlot(model, outPath, 1200, 900);
+			Plotter.GeneratePlot(model, outPath, 1200, 900, withBaby: settings.WithBaby);
 			AnsiConsole.MarkupLine($"Saved plot to [green]{outPath}[/]");
 			return 0;
 		}
@@ -167,7 +179,7 @@ public sealed class MultiPlotCommand : Command<MultiPlotSettings>
 			{
 				Plot plot = mp.GetPlot(i);
 				var model = items[i].model;
-				Plotter.FillPlot(plot, model);
+				Plotter.FillPlot(plot, model, withBaby: settings.WithBaby);
 			}
 
 			int totalW = cols * tileW + (cols - 1) * gutter + 2 * margin;
@@ -230,7 +242,7 @@ public sealed class StackedPlotCommand : Command<StackedPlotSettings>
 			int width = settings.Width ?? 1400;
 			int height = settings.Height ?? 1000;
 
-			Plotter.GenerateStackedPlot(items, outPath, width, height);
+			Plotter.GenerateStackedPlot(items, outPath, width, height, withBaby: settings.WithBaby);
 			AnsiConsole.MarkupLine($"Saved stacked plot to [green]{outPath}[/]");
 			return 0;
 		}
@@ -266,14 +278,14 @@ internal class Program
 
 public static class Plotter
 {
-	public static void GeneratePlot(BathtubModel model, string outPath, int width = 1200, int height = 900)
+	public static void GeneratePlot(BathtubModel model, string outPath, int width = 1200, int height = 900, bool withBaby = false)
 	{
 		var plot = new Plot();
-		FillPlot(plot, model);
+		FillPlot(plot, model, withBaby);
 		plot.SavePng(outPath, width, height);
 	}
 
-	public static void GenerateStackedPlot(List<(string path, BathtubModel model)> items, string outPath, int width = 1400, int height = 1000)
+	public static void GenerateStackedPlot(List<(string path, BathtubModel model)> items, string outPath, int width = 1400, int height = 1000, bool withBaby = false)
 	{
 		var plot = new Plot();
 
@@ -327,6 +339,11 @@ public static class Plotter
 		innerRing.LineWidth = 2;
 		innerRing.LegendText = "Inner Ring 60×60 cm";
 
+		// Track innermost (smallest area) tub center for optional baby alignment
+		double? innermostCenterX = null;
+		double? innermostCenterY = null;
+		double minArea = double.MaxValue;
+
 		// Draw each tub with distinct color and abbreviated legend label
 		for (int i = 0; i < items.Count; i++)
 		{
@@ -349,6 +366,30 @@ public static class Plotter
 
 			string baseName = System.IO.Path.GetFileNameWithoutExtension(path);
 			tubPoly.LegendText = $"{baseName}: {tubW}×{tubH} cm";
+
+			double area = tubW * tubH;
+			if (area < minArea)
+			{
+				minArea = area;
+				innermostCenterX = tubCenterX;
+				innermostCenterY = tubCenterY;
+			}
+		}
+
+		// Optionally draw a single baby aligned to the innermost tub midlines
+		if (withBaby && innermostCenterX.HasValue && innermostCenterY.HasValue)
+		{
+			double babyW = 17.0; // along X
+			double babyH = 40.0; // along Y
+			double bxMin = innermostCenterX.Value - babyW / 2.0;
+			double bxMax = innermostCenterX.Value + babyW / 2.0;
+			double byMin = innermostCenterY.Value - babyH / 2.0;
+			double byMax = innermostCenterY.Value + babyH / 2.0;
+			var babyRect = plot.Add.Rectangle(bxMin, bxMax, byMin, byMax);
+			babyRect.FillStyle.Color = SPColors.HotPink.WithAlpha(.18);
+			babyRect.LineStyle.Color = SPColors.DeepPink;
+			babyRect.LineStyle.Width = 2;
+			babyRect.LegendText = "Baby 40×17 cm";
 		}
 
 		// Axes and labels
@@ -364,7 +405,7 @@ public static class Plotter
 		plot.SavePng(outPath, width, height);
 	}
 
-	public static void FillPlot(Plot plot, BathtubModel model)
+	public static void FillPlot(Plot plot, BathtubModel model, bool withBaby = false)
 	{
 		// Geometry helpers
 		static Coordinates RotatePoint(Coordinates p, Coordinates center, double radians)
@@ -502,6 +543,22 @@ public static class Plotter
 		tubPoly.LineColor = tubBorder;
 		tubPoly.LineWidth = 3;
 		tubPoly.LegendText = $"Bathtub {tubW}×{tubH} cm";
+
+		// Optionally overlay baby rectangle aligned to tub midlines
+		if (withBaby)
+		{
+			double babyW = 17.0; // along X
+			double babyH = 40.0; // along Y
+			double bxMin = tubCenterX - babyW / 2.0;
+			double bxMax = tubCenterX + babyW / 2.0;
+			double byMin = tubCenterY - babyH / 2.0;
+			double byMax = tubCenterY + babyH / 2.0;
+			var babyRect = plot.Add.Rectangle(bxMin, bxMax, byMin, byMax);
+			babyRect.FillStyle.Color = SPColors.HotPink.WithAlpha(.18);
+			babyRect.LineStyle.Color = SPColors.DeepPink;
+			babyRect.LineStyle.Width = 2;
+			babyRect.LegendText = "Baby 40×17 cm";
+		}
 
 		// Axis setup: square units so geometry isn't distorted
 		plot.Axes.SquareUnits();
