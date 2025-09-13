@@ -482,8 +482,3 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
-
-# Generated images
-output
-input
-products
